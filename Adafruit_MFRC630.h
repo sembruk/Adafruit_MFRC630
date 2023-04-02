@@ -11,6 +11,8 @@
 #include <Stream.h>
 #include <Wire.h>
 
+#define Serial Serial1
+
 /*!
  * @brief MFRC630 I2C Address
  */
@@ -25,7 +27,8 @@
 #define MFRC630_VERBOSITY_DEBUG (1)   //!< Debug message output
 #define MFRC630_VERBOSITY_TRACE (2)   //!< Full packet trace dumps
 #define MFRC630_VERBOSITY                                                      \
-  (MFRC630_VERBOSITY_RELEASE) //!< Sets verbosity variable
+    MFRC630_VERBOSITY_DEBUG
+  //(MFRC630_VERBOSITY_RELEASE) //!< Sets verbosity variable
 
 #define MFRC630_ALWAYS_DISP_ERRORS (1) //!< Sets error output
 
