@@ -27,7 +27,7 @@
 #define MFRC630_VERBOSITY_DEBUG (1)   //!< Debug message output
 #define MFRC630_VERBOSITY_TRACE (2)   //!< Full packet trace dumps
 #define MFRC630_VERBOSITY                                                      \
-    MFRC630_VERBOSITY_DEBUG
+    MFRC630_VERBOSITY_RELEASE
   //(MFRC630_VERBOSITY_RELEASE) //!< Sets verbosity variable
 
 #define MFRC630_ALWAYS_DISP_ERRORS (1) //!< Sets error output
@@ -307,6 +307,12 @@ public:
    */
   uint16_t ntagWritePage(uint16_t pagenum, uint8_t *buf);
 
+  void startIQMeasurement();
+  void stopIQMeasurement(uint8_t *resultQ, uint8_t *resultI);
+  void writeIQvalues(uint8_t Qresult, uint8_t Iresult, uint8_t threshold);
+  void startLPCD(uint16_t RFOn, uint16_t RFOff);
+  void stopLPCD();
+
 private:
   int8_t _pdown;
   uint8_t _i2c_addr;
@@ -323,6 +329,7 @@ private:
   void printError(enum mfrc630errors err);
 
   uint16_t iso14443aCommand(enum iso14443_cmd cmd);
+  void timerSetReload(uint8_t timer, uint16_t value);
 };
 
 #endif

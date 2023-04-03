@@ -65,10 +65,12 @@ void Adafruit_MFRC630::write8(byte reg, byte value) {
     break;
   case MFRC630_TRANSPORT_SPI:
     /* SPI */
+    SPI.beginTransaction(SPISettings(SPI_CLOCK_DIV16, MSBFIRST, SPI_MODE0));	// Set the settings to work with SPI bus
     digitalWrite(_cs, LOW);
     SPI.transfer((reg << 1) | 0x00);
     SPI.transfer(value);
     digitalWrite(_cs, HIGH);
+    SPI.endTransaction();
     break;
   case MFRC630_TRANSPORT_SERIAL:
     /* TODO: Adjust for 10-bit protocol! */
@@ -106,6 +108,7 @@ void Adafruit_MFRC630::writeBuffer(byte reg, uint16_t len, uint8_t *buffer) {
     break;
   case MFRC630_TRANSPORT_SPI:
     /* SPI */
+    SPI.beginTransaction(SPISettings(SPI_CLOCK_DIV16, MSBFIRST, SPI_MODE0));	// Set the settings to work with SPI bus
     digitalWrite(_cs, LOW);
     SPI.transfer((reg << 1) | 0x00);
     for (uint8_t i = 0; i < len; i++) {
@@ -115,6 +118,7 @@ void Adafruit_MFRC630::writeBuffer(byte reg, uint16_t len, uint8_t *buffer) {
       TRACE_PRINT(F(" "));
     }
     digitalWrite(_cs, HIGH);
+    SPI.endTransaction();
     break;
   case MFRC630_TRANSPORT_SERIAL:
     _serial->write((reg << 1) | 0x00);
@@ -161,12 +165,14 @@ byte Adafruit_MFRC630::read8(byte reg) {
     break;
   case MFRC630_TRANSPORT_SPI:
     /* SPI */
+    SPI.beginTransaction(SPISettings(SPI_CLOCK_DIV16, MSBFIRST, SPI_MODE0));	// Set the settings to work with SPI bus
     digitalWrite(_cs, LOW);
     tx[0] = (reg << 1) | 0x01;
     tx[1] = 0;
     rx[0] = SPI.transfer(tx[0]);
     rx[1] = SPI.transfer(tx[1]);
     digitalWrite(_cs, HIGH);
+    SPI.endTransaction();
     resp = rx[1];
     break;
   case MFRC630_TRANSPORT_SERIAL:
@@ -331,14 +337,13 @@ bool Adafruit_MFRC630::begin() {
     _wire->begin();
     break;
   case MFRC630_TRANSPORT_SPI:
-    DEBUG_PRINTLN(F("Initialising SPI (Mode 0, MSB, DIV16)"));
-    SPI.begin();
-    SPI.setDataMode(SPI_MODE0);
-    SPI.setBitOrder(MSBFIRST);
-#ifdef SPI_CLOCK_DIV16
-    //SPI.setClockDivider(SPI_CLOCK_DIV16);
-    SPI.setClockDivider(SPI_CLOCK_DIV4);
-#endif
+//    DEBUG_PRINTLN(F("Initialising SPI (Mode 0, MSB, DIV16)"));
+//    SPI.begin();
+//    SPI.setDataMode(SPI_MODE0);
+//    SPI.setBitOrder(MSBFIRST);
+//#ifdef SPI_CLOCK_DIV16
+//    SPI.setClockDivider(SPI_CLOCK_DIV16);
+//#endif
     break;
   case MFRC630_TRANSPORT_SERIAL:
     /* NOTE: 'Serial' has to be initialised in the calling sketch! */
@@ -373,7 +378,8 @@ bool Adafruit_MFRC630::begin() {
   }
 
   /* If !1.8, there was a problem */
-  if (ver != 0x18) {
+  if (ver != 0x18 &&
+      ver != 0x30) { // probably MFRC63001
     DEBUG_TIMESTAMP();
     DEBUG_PRINTLN(F("FAILED!"));
     return false;
@@ -1483,3 +1489,136 @@ uint16_t Adafruit_MFRC630::ntagWritePage(uint16_t pagenum, uint8_t *buf) {
   /* Use the Mifare write, which is compatible with the NTAG cards. */
   return mifareWriteBlock(pagenum, buf) == 16 ? 4 : 0;
 }
+
+uint8_t bRcvBackup=0; //backup location for receiver settings
+
+// See AN11145
+void Adafruit_MFRC630::startIQMeasurement() {
+  // Part-1, configurate LPCD Mode
+  // Please remove any PICC from the HF of the reader.
+  // "I" and the "Q" values read from reg 0x42 and 0x43
+  // shall be used in part-2 "Detect PICC"
+
+  softReset();
+  writeCommand(MFRC630_CMD_IDLE);
+  // Disable IRQ0, IRQ1 interrupt sources
+  write8(MFRC630_REG_IRQ0, 0x7F);
+  write8(MFRC630_REG_IRQ1, 0x7F);
+  write8(MFRC630_REG_IRQOEN, 0);
+  write8(MFRC630_REG_IRQ1EN, 0);
+ 
+  //write8(MFRC630_REG_FIFO_CONTROL, 0xB0);  // Flush FIFO
+  clearFIFO();
+  // LPCD_config
+  write8(MFRC630_REG_LPCD_QMIN, 0xC0);  // Set Qmin register
+  write8(MFRC630_REG_LPCD_QMAX, 0xFF);  // Set Qmax register
+  write8(MFRC630_REG_LPCD_IMIN, 0xC0);  // Set Imin register
+  //write8(MFRC630_REG_DRV_MOD, 0x89);  // set DrvMode register
+  // Execute trimming procedure
+  write8(MFRC630_REG_T3_RELOAD_HI, 0x00);  // Write default. T3 reload value Hi
+  write8(MFRC630_REG_T3_RELOAD_LO, 0x10);  // Write default. T3 reload value Lo
+  write8(MFRC630_REG_T4_RELOAD_HI, 0x00);  // Write min. T4 reload value Hi
+  write8(MFRC630_REG_T4_RELOAD_LO, 0x05);  // Write min. T4 reload value Lo
+  write8(MFRC630_REG_T4_CONTROL, 0xF8);  // Config T4 for AutoLPCD&AutoRestart. Set AutoTrimm bit. Start T4.
+  write8(MFRC630_REG_LPCD_Q_RESULT, 0x40);  // Clear LPCD result
+
+  // Set Rx_ADCmode bit
+  uint8_t bRegister = read8(MFRC630_REG_RCV);
+  bRegister |= 0x40;
+  write8(MFRC630_REG_RCV, bRegister);
+
+  // Raise receiver gain to maximum
+  bRcvBackup = read8(MFRC630_REG_RX_ANA);
+  write8(MFRC630_REG_RX_ANA, 0x03);
+
+  // Execute Rc663 command "Auto_T4" (Low power card detection and/or Auto trimming)
+  writeCommand(MFRC630_CMD_LPCD); // write8(0x00, 0x01);  
+}
+
+void Adafruit_MFRC630::stopIQMeasurement(uint8_t *resultQ, uint8_t *resultI) {
+  // Flush cmd and FIFO
+  writeCommand(MFRC630_CMD_IDLE);
+  clearFIFO();
+  // clear Rx_ADCmode bit
+  uint8_t bRegister = read8(MFRC630_REG_RCV);
+  bRegister &= ~0x40;
+  write8(MFRC630_REG_RCV, bRegister);
+  //restore backup
+  write8(MFRC630_REG_RX_ANA, bRcvBackup);
+  
+  //Stop Timer4 if running
+  bRegister = read8(MFRC630_REG_T4_CONTROL);
+  bRegister |= 0x40;
+  bRegister &= ~0x80;
+  write8(MFRC630_REG_T4_CONTROL, bRegister);
+  //> ------------ I and Q Value for LPCD ----------------
+  bRegister = read8(MFRC630_REG_LPCD_I_RESULT);
+  *resultI = bRegister & 0x3F;
+  bRegister = read8(MFRC630_REG_LPCD_Q_RESULT);
+  *resultQ = bRegister & 0x3F;
+}
+
+void Adafruit_MFRC630::writeIQvalues(uint8_t q, uint8_t i, uint8_t threshold) {
+  uint8_t bIMax = i + threshold;
+  write8(MFRC630_REG_LPCD_QMIN, (q-threshold) | (uint8_t)((bIMax & 0x30U) << 2U));  // Set Qmin register
+  write8(MFRC630_REG_LPCD_QMAX, (q+threshold) | (uint8_t)((bIMax & 0x0CU) << 4U));  // Set Qmax register
+  write8(MFRC630_REG_LPCD_IMIN, (i-threshold) | (uint8_t)((bIMax & 0x03U) << 6U));  // Set Imin register
+}
+
+void Adafruit_MFRC630::timerSetReload(uint8_t timer, uint16_t value) {
+  write8(MFRC630_REG_T0_RELOAD_HI + (5*timer), value >> 8);
+  write8(MFRC630_REG_TO_RELOAD_LO + (5*timer), value & 0xFF);
+}
+
+/*! \brief Starts LPCD
+    Starts Low Power card detection mode
+	\param [in] RFOntime defines the time with RFOn in the LPCD cycle in us. Recommendation: 10 [us].
+	\param [in] RFOfftime defines the time with RFOff in the LPCD cycle in ms. Recommendation: 500 [ms].
+*/
+void Adafruit_MFRC630::startLPCD(uint16_t RFOn, uint16_t RFOff) {
+  //configure timers
+  uint16_t dwRFOn = RFOn*14;
+  uint16_t dwRFOff = RFOff*16;
+  
+  timerSetReload(3, dwRFOn); //~10us (10 * 13.56), as clock runs on 13.56MHz)
+  timerSetReload(4, dwRFOff); //~1000ms (1000 * 16), as clock runs on 16kHz)
+  
+  write8(MFRC630_REG_T4_CONTROL, 0xDC);  // Config T4 for AutoLPCD&AutoRestart. Start T4.
+  write8(MFRC630_REG_LPCD_Q_RESULT, 0x40);  // Clear LPCD result
+  
+  // Set Rx_ADCmode bit
+  uint8_t bRegister = read8(MFRC630_REG_RCV);
+  bRegister |= 0x40;
+  write8(MFRC630_REG_RCV, bRegister);
+  
+  // Raise receiver gain to maximum
+  bRcvBackup = read8(0x39);
+  write8(0x39, 0x03);
+  
+  //Start LPCD
+  write8(MFRC630_REG_IRQ1, 0x20); // Clear LPCD IRQs
+  write8(MFRC630_REG_IRQ1EN, 0xe0); // Set IRQPushPull, IRQPinEN and LPCD_IRQEN bits
+  write8(0x00, 0x81);  // Execute Rc663 command "Auto_T4" (Low power card detection and/or Auto trimming)
+}
+
+void Adafruit_MFRC630::stopLPCD() {
+  write8(MFRC630_REG_IRQ1EN, 0);
+  write8(MFRC630_REG_IRQ1, MFRC630IRQ1_LPCDIRQ); // Clear IRQ
+
+  // clear Rx_ADCmode bit
+  uint8_t bRegister = read8(0x38);
+  bRegister &= ~0x40;
+  write8(0x38, bRegister);
+  //restore backup
+  write8(0x39, bRcvBackup);
+  
+  //Stop Timer4 if running
+  bRegister = read8(0x23);
+  bRegister |= 0x40;
+  bRegister &= ~0x80;
+  write8(0x23, bRegister);
+
+  writeCommand(MFRC630_CMD_IDLE);
+  clearFIFO();
+}
+
