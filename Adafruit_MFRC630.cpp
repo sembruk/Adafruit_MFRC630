@@ -802,7 +802,6 @@ uint16_t Adafruit_MFRC630::iso14443aCommand(enum iso14443_cmd cmd) {
  * https://www.nxp.com/docs/en/application-note/AN10833.pdf
  */
 uint8_t Adafruit_MFRC630::iso14443aSelect(uint8_t *uid, uint8_t *sak) {
-  (void)sak;
   DEBUG_TIMESTAMP();
   DEBUG_PRINTLN(F("Selecting an ISO14443A tag"));
 
@@ -1096,6 +1095,7 @@ uint8_t Adafruit_MFRC630::iso14443aSelect(uint8_t *uid, uint8_t *sak) {
       for (UIDn = 0; UIDn < 4; UIDn++) {
         uid[(cascadelvl - 1) * 3 + UIDn] = uid_this_level[UIDn];
       }
+      *sak = sak_value;
 
       /* Finally, return the length of the UID that's now at the uid pointer. */
       return cascadelvl * 3 + 1;
